@@ -61,18 +61,19 @@ def signup():
         email = data.get('email')
         password = data.get('password')
         name = data.get('name')
-
+        
+        # 입력 검증
         if not email or not password or not name:
             return jsonify({'error': '모든 필드를 입력해주세요'}), 400
         
-        # 비밀번호 해싱
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-
+        # 비밀번호 해시화 (문자열로 변환)
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
         conn = get_db_connection()
         cur = conn.cursor()
-
+        
         # 이메일 중복 확인
-        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT id FROM users WHERE email = %s", (email,))
         if cur.fetchone():
             cur.close()
             conn.close()
@@ -83,17 +84,17 @@ def signup():
             "INSERT INTO users (email, password, name) VALUES (%s, %s, %s) RETURNING id",
             (email, hashed_password, name)
         )
-
         user_id = cur.fetchone()[0]
         conn.commit()
-
+        
         cur.close()
         conn.close()
-
+        
         return jsonify({
-            'message': '회원가입 완료',
+            'message': '회원가입 성공',
             'user_id': user_id
         }), 201
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
