@@ -11,7 +11,7 @@ app = Flask(__name__)
 CORS(app) # React에서 접근 가능하도록
 
 # 설정
-app.config['SECRET_KEY'] = 'your_secret_key'
+app.config['SECRET_KEY'] = 'your-secret-key-change-this'
 
 # DB 연결 함수
 def get_db_connection():
@@ -30,19 +30,33 @@ def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         token = request.headers.get('Authorization')
-
+        
         if not token:
+            print("❌ 토큰이 없습니다")
             return jsonify({'error': '토큰이 필요합니다'}), 401
+        
+        print(f"✅ 토큰 받음: {token[:50]}...")  # 처음 50자만 출력
         
         try:
             # "Bearer TOKEN" 형식에서 토큰만 추출
             if token.startswith('Bearer '):
-                token = token[7:]  
-
-            data = jwt.decode(token, app.config['SECRET_KEY'], algrithms=["HS256"])
+                token = token[7:]
+            
+            print(f"🔍 토큰 디코딩 시도...")
+            print(f"🔑 SECRET_KEY: {app.config['SECRET_KEY']}")
+            
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
             current_user_id = data['user_id']
-        except:
+            
+            print(f"✅ 토큰 검증 성공! user_id: {current_user_id}")
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': '토큰이 만료되었습니다'}), 401
+        except jwt.InvalidTokenError as e:
+            print(f"토큰 검증 실패: {e}")  # 디버깅용 로그
             return jsonify({'error': '유효하지 않은 토큰입니다'}), 401
+        except Exception as e:
+            print(f"토큰 처리 중 에러: {e}")  # 디버깅용 로그
+            return jsonify({'error': '토큰 처리 중 오류가 발생했습니다'}), 401
         
         return f(current_user_id, *args, **kwargs)
     
