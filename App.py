@@ -49,7 +49,7 @@ def token_required(f):
     return decorated
 
 # 1. 헬스체크
-@app.route('api/health', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'ok', 'message': 'API 서버가 정상 작동 중입니다'})
 
