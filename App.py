@@ -4,7 +4,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import bcrypt
 import jwt
-import datetime import datetime, timedelta
+from datetime import datetime, timedelta
 from functools import wraps
 
 app = Flask(__name__)
