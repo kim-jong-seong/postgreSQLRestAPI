@@ -319,7 +319,7 @@ if __name__ == '__main__':
     print("=" * 50)
     print("🚀 Flask API 서버 시작")
     print("=" * 50)
-    print("📍 서버 주소: http://0.0.0.0:5000")
+    print("📍 서버 주소: http://0.0.0.0:3001")
     print("\n📚 API 엔드포인트:")
     print("  GET    /api/health          - 헬스체크")
     print("  POST   /api/signup          - 회원가입")
@@ -332,4 +332,5 @@ if __name__ == '__main__':
     print("  DELETE /api/users/me        - 회원 탈퇴 (토큰 필요)")
     print("=" * 50)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+    app.run(host='0.0.0.0', port=3001, debug=True)
