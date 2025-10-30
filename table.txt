@@ -1,0 +1,204 @@
+-- ============================================
+-- 사용자
+-- ============================================
+CREATE TABLE users (
+    id VARCHAR(10) PRIMARY KEY,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE users_id_seq START 1;
+
+CREATE OR REPLACE FUNCTION generate_user_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        NEW.id := LPAD(nextval('users_id_seq')::TEXT, 10, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_user_id
+    BEFORE INSERT ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_user_id();
+
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at();
+
+-- ============================================
+-- 공통코드 마스터
+-- ============================================
+CREATE TABLE com_code_m (
+    cd VARCHAR(20) PRIMARY KEY,
+    nm VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10),
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10),
+    
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ============================================
+-- 공통코드 상세
+-- ============================================
+CREATE TABLE com_code_d (
+    cd VARCHAR(20) PRIMARY KEY,
+    nm VARCHAR(100) NOT NULL,
+    up_cd VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10),
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10),
+    
+    FOREIGN KEY (up_cd) REFERENCES com_code_m(cd) ON DELETE CASCADE,
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ============================================
+-- 집
+-- ============================================
+CREATE TABLE houses (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10) NOT NULL,
+    
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+-- ============================================
+-- 집 구성원
+-- ============================================
+CREATE TABLE house_members (
+    id SERIAL PRIMARY KEY,
+    house_id INT NOT NULL,
+    user_id VARCHAR(10) NOT NULL,
+    role_cd VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10) NOT NULL,
+    
+    FOREIGN KEY (house_id) REFERENCES houses(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (role_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT,
+    
+    UNIQUE(house_id, user_id)
+);
+
+-- ============================================
+-- 컨테이너 (영역 + 박스 통합)
+-- ============================================
+CREATE TABLE containers (
+    id SERIAL PRIMARY KEY,
+    house_id INT NOT NULL,
+    up_container_id INT,
+    type_cd VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10) NOT NULL,
+    
+    FOREIGN KEY (house_id) REFERENCES houses(id) ON DELETE CASCADE,
+    FOREIGN KEY (up_container_id) REFERENCES containers(id) ON DELETE CASCADE,
+    FOREIGN KEY (type_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+-- ============================================
+-- 물건
+-- ============================================
+CREATE TABLE items (
+    id SERIAL PRIMARY KEY,
+    container_id INT NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    quantity INT NOT NULL DEFAULT 1,
+    remk TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10) NOT NULL,
+    
+    FOREIGN KEY (container_id) REFERENCES containers(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT,
+    
+    CHECK (quantity >= 0)
+);
+
+-- ============================================
+-- 물건 이동 기록
+-- ============================================
+CREATE TABLE item_logs (
+    id SERIAL PRIMARY KEY,
+    item_id INT NOT NULL,
+    act_cd VARCHAR(20) NOT NULL,
+    from_container_id INT,
+    to_container_id INT,
+    remk TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10) NOT NULL,
+    
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
+    FOREIGN KEY (act_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
+    FOREIGN KEY (from_container_id) REFERENCES containers(id) ON DELETE SET NULL,
+    FOREIGN KEY (to_container_id) REFERENCES containers(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+-- ============================================
+-- 인덱스 생성
+-- ============================================
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_com_code_d_up_cd ON com_code_d(up_cd);
+CREATE INDEX idx_house_members_house ON house_members(house_id);
+CREATE INDEX idx_house_members_user ON house_members(user_id);
+CREATE INDEX idx_containers_house ON containers(house_id);
+CREATE INDEX idx_containers_parent ON containers(up_container_id);
+CREATE INDEX idx_containers_type ON containers(type_cd);
+CREATE INDEX idx_items_container ON items(container_id);
+CREATE INDEX idx_item_logs_item ON item_logs(item_id);
+CREATE INDEX idx_item_logs_created ON item_logs(created_at);
+
+-- ============================================
+-- 코멘트
+-- ============================================
+COMMENT ON TABLE users IS '사용자';
+COMMENT ON TABLE houses IS '집 정보';
+COMMENT ON TABLE house_members IS '집 구성원';
+COMMENT ON TABLE containers IS '컨테이너 (영역/박스 통합)';
+COMMENT ON TABLE items IS '물건';
+COMMENT ON TABLE item_logs IS '물건 이동 기록';
+COMMENT ON TABLE com_code_m IS '공통코드 마스터';
+COMMENT ON TABLE com_code_d IS '공통코드 상세';
+
+COMMENT ON COLUMN containers.type_cd IS '컨테이너 유형 (AREA: 영역, BOX: 박스 등)';
+COMMENT ON COLUMN containers.up_container_id IS '부모 컨테이너 (NULL이면 최상위)';
