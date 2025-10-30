@@ -1,4 +1,43 @@
 -- ============================================
+-- 기존 테이블 및 관련 객체 삭제
+-- ============================================
+
+-- 트리거 삭제
+DROP TRIGGER IF EXISTS set_user_id ON users;
+DROP TRIGGER IF EXISTS set_updated_at ON users;
+DROP TRIGGER IF EXISTS set_house_id ON houses;
+DROP TRIGGER IF EXISTS set_house_member_seq ON house_members;
+DROP TRIGGER IF EXISTS set_container_id ON containers;
+DROP TRIGGER IF EXISTS set_item_id ON items;
+DROP TRIGGER IF EXISTS set_item_log_id ON item_logs;
+
+-- 함수 삭제
+DROP FUNCTION IF EXISTS generate_user_id();
+DROP FUNCTION IF EXISTS update_updated_at();
+DROP FUNCTION IF EXISTS generate_house_id();
+DROP FUNCTION IF EXISTS generate_house_member_seq();
+DROP FUNCTION IF EXISTS generate_container_id();
+DROP FUNCTION IF EXISTS generate_item_id();
+DROP FUNCTION IF EXISTS generate_item_log_id();
+
+-- 시퀀스 삭제
+DROP SEQUENCE IF EXISTS users_id_seq;
+DROP SEQUENCE IF EXISTS houses_id_seq;
+DROP SEQUENCE IF EXISTS containers_id_seq;
+DROP SEQUENCE IF EXISTS items_id_seq;
+DROP SEQUENCE IF EXISTS item_logs_id_seq;
+
+-- 테이블 삭제 (의존성 순서 고려)
+DROP TABLE IF EXISTS item_logs CASCADE;
+DROP TABLE IF EXISTS items CASCADE;
+DROP TABLE IF EXISTS containers CASCADE;
+DROP TABLE IF EXISTS house_members CASCADE;
+DROP TABLE IF EXISTS houses CASCADE;
+DROP TABLE IF EXISTS com_code_d CASCADE;
+DROP TABLE IF EXISTS com_code_m CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- ============================================
 -- 사용자
 -- ============================================
 CREATE TABLE users (
@@ -76,7 +115,7 @@ CREATE TABLE com_code_d (
 -- 집
 -- ============================================
 CREATE TABLE houses (
-    id SERIAL PRIMARY KEY,
+    id VARCHAR(11) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_user VARCHAR(10) NOT NULL,
@@ -87,35 +126,69 @@ CREATE TABLE houses (
     FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
 );
 
+CREATE SEQUENCE houses_id_seq START 1;
+
+CREATE OR REPLACE FUNCTION generate_house_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        NEW.id := 'H' || TO_CHAR(CURRENT_DATE, 'YYYY') || LPAD(nextval('houses_id_seq')::TEXT, 5, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_house_id
+    BEFORE INSERT ON houses
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_house_id();
+
 -- ============================================
 -- 집 구성원
 -- ============================================
 CREATE TABLE house_members (
-    id SERIAL PRIMARY KEY,
-    house_id INT NOT NULL,
+    house_id VARCHAR(11) NOT NULL,
     user_id VARCHAR(10) NOT NULL,
+    seq INT NOT NULL,
     role_cd VARCHAR(20) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_user VARCHAR(10) NOT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_user VARCHAR(10) NOT NULL,
     
+    PRIMARY KEY (house_id, user_id),
     FOREIGN KEY (house_id) REFERENCES houses(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (role_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
     FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
-    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT,
-    
-    UNIQUE(house_id, user_id)
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
 );
+
+CREATE OR REPLACE FUNCTION generate_house_member_seq()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.seq IS NULL THEN
+        SELECT COALESCE(MAX(seq), 0) + 1 
+        INTO NEW.seq 
+        FROM house_members 
+        WHERE house_id = NEW.house_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_house_member_seq
+    BEFORE INSERT ON house_members
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_house_member_seq();
 
 -- ============================================
 -- 컨테이너 (영역 + 박스 통합)
 -- ============================================
 CREATE TABLE containers (
-    id SERIAL PRIMARY KEY,
-    house_id INT NOT NULL,
-    up_container_id INT,
+    id VARCHAR(11) PRIMARY KEY,
+    house_id VARCHAR(11) NOT NULL,
+    up_container_id VARCHAR(11),
     type_cd VARCHAR(20) NOT NULL,
     name VARCHAR(100) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -130,12 +203,29 @@ CREATE TABLE containers (
     FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
 );
 
+CREATE SEQUENCE containers_id_seq START 1;
+
+CREATE OR REPLACE FUNCTION generate_container_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        NEW.id := 'C' || TO_CHAR(CURRENT_DATE, 'YYYY') || LPAD(nextval('containers_id_seq')::TEXT, 5, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_container_id
+    BEFORE INSERT ON containers
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_container_id();
+
 -- ============================================
 -- 물건
 -- ============================================
 CREATE TABLE items (
-    id SERIAL PRIMARY KEY,
-    container_id INT NOT NULL,
+    id VARCHAR(11) PRIMARY KEY,
+    container_id VARCHAR(11) NOT NULL,
     name VARCHAR(200) NOT NULL,
     quantity INT NOT NULL DEFAULT 1,
     remk TEXT,
@@ -151,15 +241,32 @@ CREATE TABLE items (
     CHECK (quantity >= 0)
 );
 
+CREATE SEQUENCE items_id_seq START 1;
+
+CREATE OR REPLACE FUNCTION generate_item_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        NEW.id := 'I' || TO_CHAR(CURRENT_DATE, 'YYYY') || LPAD(nextval('items_id_seq')::TEXT, 5, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_item_id
+    BEFORE INSERT ON items
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_item_id();
+
 -- ============================================
 -- 물건 이동 기록
 -- ============================================
 CREATE TABLE item_logs (
-    id SERIAL PRIMARY KEY,
-    item_id INT NOT NULL,
+    id VARCHAR(11) PRIMARY KEY,
+    item_id VARCHAR(11) NOT NULL,
     act_cd VARCHAR(20) NOT NULL,
-    from_container_id INT,
-    to_container_id INT,
+    from_container_id VARCHAR(11),
+    to_container_id VARCHAR(11),
     remk TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_user VARCHAR(10) NOT NULL,
@@ -173,6 +280,23 @@ CREATE TABLE item_logs (
     FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
     FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
 );
+
+CREATE SEQUENCE item_logs_id_seq START 1;
+
+CREATE OR REPLACE FUNCTION generate_item_log_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        NEW.id := 'L' || TO_CHAR(CURRENT_DATE, 'YYYY') || LPAD(nextval('item_logs_id_seq')::TEXT, 5, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_item_log_id
+    BEFORE INSERT ON item_logs
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_item_log_id();
 
 -- ============================================
 -- 인덱스 생성
@@ -199,6 +323,3 @@ COMMENT ON TABLE items IS '물건';
 COMMENT ON TABLE item_logs IS '물건 이동 기록';
 COMMENT ON TABLE com_code_m IS '공통코드 마스터';
 COMMENT ON TABLE com_code_d IS '공통코드 상세';
-
-COMMENT ON COLUMN containers.type_cd IS '컨테이너 유형 (AREA: 영역, BOX: 박스 등)';
-COMMENT ON COLUMN containers.up_container_id IS '부모 컨테이너 (NULL이면 최상위)';
