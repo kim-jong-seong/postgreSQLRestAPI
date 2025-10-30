@@ -323,3 +323,46 @@ COMMENT ON TABLE items IS '물건';
 COMMENT ON TABLE item_logs IS '물건 이동 기록';
 COMMENT ON TABLE com_code_m IS '공통코드 마스터';
 COMMENT ON TABLE com_code_d IS '공통코드 상세';
+
+
+
+
+
+
+-- ============================================
+-- 기존 공통코드 삭제
+-- ============================================
+DELETE FROM com_code_d;
+DELETE FROM com_code_m;
+
+-- ============================================
+-- 공통코드 마스터
+-- ============================================
+INSERT INTO com_code_m (cd, nm, created_at, created_user, updated_at, updated_user) VALUES 
+('COM110', '권한', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM120', '컨테이너 종류', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM130', '행위', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
+
+-- ============================================
+-- 공통코드 상세 - 권한
+-- ============================================
+INSERT INTO com_code_d (cd, nm, up_cd, created_at, created_user, updated_at, updated_user) VALUES 
+('COM1100001', '관리자', 'COM110', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1100002', '멤버', 'COM110', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
+
+-- ============================================
+-- 공통코드 상세 - 컨테이너 종류
+-- ============================================
+INSERT INTO com_code_d (cd, nm, up_cd, created_at, created_user, updated_at, updated_user) VALUES 
+('COM1200001', '영역', 'COM120', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1200002', '박스', 'COM120', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
+
+-- ============================================
+-- 공통코드 상세 - 행위
+-- ============================================
+INSERT INTO com_code_d (cd, nm, up_cd, created_at, created_user, updated_at, updated_user) VALUES 
+('COM1300001', '반입', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1300002', '반출', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1300003', '이동', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1300004', '수정', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1300005', '수량변경', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
