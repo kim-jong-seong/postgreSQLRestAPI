@@ -20,9 +20,11 @@ def get_my_houses(current_user_id):
                 h.name, 
                 hm.role_cd,
                 hm.seq,
+                cd.nm as role_nm,
                 h.created_at
             FROM houses h
-            JOIN house_members hm ON h.id = hm.house_id
+                JOIN house_members hm ON h.id = hm.house_id
+                LEFT JOIN com_code_d cd ON hm.role_cd = cd.cd
             WHERE hm.user_id = %s
             ORDER BY h.id
             """,
