@@ -7,6 +7,7 @@ DROP TRIGGER IF EXISTS set_user_id ON users;
 DROP TRIGGER IF EXISTS set_updated_at ON users;
 DROP TRIGGER IF EXISTS set_house_id ON houses;
 DROP TRIGGER IF EXISTS set_house_member_seq ON house_members;
+DROP TRIGGER IF EXISTS set_invitation_id ON house_invitations;
 DROP TRIGGER IF EXISTS set_container_id ON containers;
 DROP TRIGGER IF EXISTS set_item_id ON items;
 DROP TRIGGER IF EXISTS set_item_log_id ON item_logs;
@@ -16,6 +17,7 @@ DROP FUNCTION IF EXISTS generate_user_id();
 DROP FUNCTION IF EXISTS update_updated_at();
 DROP FUNCTION IF EXISTS generate_house_id();
 DROP FUNCTION IF EXISTS generate_house_member_seq();
+DROP FUNCTION IF EXISTS generate_invitation_id();
 DROP FUNCTION IF EXISTS generate_container_id();
 DROP FUNCTION IF EXISTS generate_item_id();
 DROP FUNCTION IF EXISTS generate_item_log_id();
@@ -23,6 +25,7 @@ DROP FUNCTION IF EXISTS generate_item_log_id();
 -- 시퀀스 삭제
 DROP SEQUENCE IF EXISTS users_id_seq;
 DROP SEQUENCE IF EXISTS houses_id_seq;
+DROP SEQUENCE IF EXISTS invitations_id_seq;
 DROP SEQUENCE IF EXISTS containers_id_seq;
 DROP SEQUENCE IF EXISTS items_id_seq;
 DROP SEQUENCE IF EXISTS item_logs_id_seq;
@@ -31,6 +34,7 @@ DROP SEQUENCE IF EXISTS item_logs_id_seq;
 DROP TABLE IF EXISTS item_logs CASCADE;
 DROP TABLE IF EXISTS items CASCADE;
 DROP TABLE IF EXISTS containers CASCADE;
+DROP TABLE IF EXISTS house_invitations CASCADE;
 DROP TABLE IF EXISTS house_members CASCADE;
 DROP TABLE IF EXISTS houses CASCADE;
 DROP TABLE IF EXISTS com_code_d CASCADE;
@@ -183,6 +187,51 @@ CREATE TRIGGER set_house_member_seq
     EXECUTE FUNCTION generate_house_member_seq();
 
 -- ============================================
+-- 집 멤버 초대
+-- ============================================
+CREATE TABLE house_invitations (
+    id VARCHAR(11) PRIMARY KEY,
+    house_id VARCHAR(11) NOT NULL,
+    inviter_user_id VARCHAR(10) NOT NULL,
+    invitee_user_id VARCHAR(10) NOT NULL,
+    status_cd VARCHAR(20) NOT NULL DEFAULT 'COM1400001',
+    responded_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_user VARCHAR(10) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_user VARCHAR(10) NOT NULL,
+    
+    FOREIGN KEY (house_id) REFERENCES houses(id) ON DELETE CASCADE,
+    FOREIGN KEY (inviter_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (invitee_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (status_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
+    FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+CREATE SEQUENCE invitations_id_seq START 1;
+
+CREATE OR REPLACE FUNCTION generate_invitation_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        NEW.id := 'INV' || TO_CHAR(CURRENT_DATE, 'YYYY') || LPAD(nextval('invitations_id_seq')::TEXT, 4, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_invitation_id
+    BEFORE INSERT ON house_invitations
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_invitation_id();
+
+-- 대기중인 초대만 중복 방지
+CREATE UNIQUE INDEX idx_unique_pending_invitation 
+ON house_invitations(house_id, invitee_user_id) 
+WHERE status_cd = 'COM1400001';
+
+-- ============================================
 -- 컨테이너 (영역 + 박스 통합)
 -- ============================================
 CREATE TABLE containers (
@@ -305,6 +354,10 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_com_code_d_up_cd ON com_code_d(up_cd);
 CREATE INDEX idx_house_members_house ON house_members(house_id);
 CREATE INDEX idx_house_members_user ON house_members(user_id);
+CREATE INDEX idx_invitations_house ON house_invitations(house_id);
+CREATE INDEX idx_invitations_inviter ON house_invitations(inviter_user_id);
+CREATE INDEX idx_invitations_invitee ON house_invitations(invitee_user_id);
+CREATE INDEX idx_invitations_status ON house_invitations(status_cd);
 CREATE INDEX idx_containers_house ON containers(house_id);
 CREATE INDEX idx_containers_parent ON containers(up_container_id);
 CREATE INDEX idx_containers_type ON containers(type_cd);
@@ -318,6 +371,7 @@ CREATE INDEX idx_item_logs_created ON item_logs(created_at);
 COMMENT ON TABLE users IS '사용자';
 COMMENT ON TABLE houses IS '집 정보';
 COMMENT ON TABLE house_members IS '집 구성원';
+COMMENT ON TABLE house_invitations IS '집 멤버 초대';
 COMMENT ON TABLE containers IS '컨테이너 (영역/박스 통합)';
 COMMENT ON TABLE items IS '물건';
 COMMENT ON TABLE item_logs IS '물건 이동 기록';
@@ -341,7 +395,8 @@ DELETE FROM com_code_m;
 INSERT INTO com_code_m (cd, nm, created_at, created_user, updated_at, updated_user) VALUES 
 ('COM110', '권한', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
 ('COM120', '컨테이너 종류', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
-('COM130', '행위', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
+('COM130', '행위', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM140', '초대 상태', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
 
 -- ============================================
 -- 공통코드 상세 - 권한
@@ -366,3 +421,12 @@ INSERT INTO com_code_d (cd, nm, up_cd, created_at, created_user, updated_at, upd
 ('COM1300003', '이동', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
 ('COM1300004', '수정', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
 ('COM1300005', '수량변경', 'COM130', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
+
+-- ============================================
+-- 공통코드 상세 - 초대 상태
+-- ============================================
+INSERT INTO com_code_d (cd, nm, up_cd, created_at, created_user, updated_at, updated_user) VALUES 
+('COM1400001', '대기중', 'COM140', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1400002', '수락됨', 'COM140', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1400003', '거절됨', 'COM140', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001'),
+('COM1400004', '취소됨', 'COM140', CURRENT_TIMESTAMP, '0000000001', CURRENT_TIMESTAMP, '0000000001');
