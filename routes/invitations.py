@@ -137,7 +137,7 @@ def get_received_invitations(current_user_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# 2-1. 보낸 초대 목록 조회 (최근 7일)
+# 2-1. 보낸 초대 목록 조회 (대기중만, 전체 기간)
 @invitations_bp.route('/invitations/sent', methods=['GET'])
 @token_required
 def get_sent_invitations(current_user_id):
@@ -163,7 +163,7 @@ def get_sent_invitations(current_user_id):
                 JOIN users u ON hi.invitee_user_id = u.id
                 LEFT JOIN com_code_d cd ON hi.status_cd = cd.cd
             WHERE hi.inviter_user_id = %s 
-                AND hi.created_at >= CURRENT_DATE - INTERVAL '7 days'
+                AND hi.status_cd = 'COM1400001'
             ORDER BY hi.created_at DESC
             """,
             (current_user_id,)
