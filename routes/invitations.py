@@ -11,10 +11,10 @@ invitations_bp = Blueprint('invitations', __name__, url_prefix='/api')
 def send_invitation(current_user_id, house_id):
     try:
         data = request.json
-        invitee_user_id = data.get('invitee_user_id')
+        invitee_email = data.get('invitee_email')
         
-        if not invitee_user_id:
-            return jsonify({'error': '초대할 사용자 ID를 입력해주세요'}), 400
+        if not invitee_email:
+            return jsonify({'error': '초대할 사용자의 이메일을 입력해주세요'}), 400
         
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -29,13 +29,15 @@ def send_invitation(current_user_id, house_id):
             conn.close()
             return jsonify({'error': '해당 집의 멤버만 초대할 수 있습니다'}), 403
         
-        # 2. 초대받을 사용자가 존재하는지 확인
-        cur.execute("SELECT id, name, email FROM users WHERE id = %s", (invitee_user_id,))
+        # 2. 이메일로 사용자 조회
+        cur.execute("SELECT id, name, email FROM users WHERE email = %s", (invitee_email,))
         invitee = cur.fetchone()
         if not invitee:
             cur.close()
             conn.close()
-            return jsonify({'error': '존재하지 않는 사용자입니다'}), 404
+            return jsonify({'error': '가입되지 않은 이메일입니다'}), 404
+        
+        invitee_user_id = invitee['id']
         
         # 3. 자기 자신 초대 방지
         if invitee_user_id == current_user_id:
