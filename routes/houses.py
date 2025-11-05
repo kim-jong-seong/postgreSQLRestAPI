@@ -21,10 +21,17 @@ def get_my_houses(current_user_id):
                 hm.role_cd,
                 hm.seq,
                 cd.nm as role_nm,
-                h.created_at
+                h.created_at,
+                admin.name as admin_name
             FROM houses h
                 JOIN house_members hm ON h.id = hm.house_id
                 LEFT JOIN com_code_d cd ON hm.role_cd = cd.cd
+                LEFT JOIN (
+                    SELECT house_id, user_id
+                    FROM house_members
+                    WHERE role_cd = 'COM1100001'
+                ) admin_member ON h.id = admin_member.house_id
+                LEFT JOIN users admin ON admin_member.user_id = admin.id
             WHERE hm.user_id = %s
             ORDER BY h.id
             """,
@@ -132,6 +139,52 @@ def delete_house(current_user_id, house_id):
         conn.close()
         
         return jsonify({'message': '집 삭제 성공'}), 200
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    
+# 4. 집 나가기 (멤버 전용)
+@houses_bp.route('/<house_id>/leave', methods=['DELETE'])
+@token_required
+def leave_house(current_user_id, house_id):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 권한 확인
+        cur.execute(
+            """
+            SELECT role_cd 
+            FROM house_members 
+            WHERE house_id = %s AND user_id = %s
+            """,
+            (house_id, current_user_id)
+        )
+        member = cur.fetchone()
+        
+        if not member:
+            return jsonify({'error': '해당 집의 구성원이 아닙니다'}), 403
+        
+        # 관리자는 나갈 수 없음
+        if member['role_cd'] == 'COM1100001':
+            return jsonify({'error': '관리자는 나갈 수 없습니다. 먼저 다른 사람에게 관리자 권한을 양도하거나 집을 삭제하세요'}), 403
+        
+        # 멤버 삭제
+        cur.execute(
+            "DELETE FROM house_members WHERE house_id = %s AND user_id = %s",
+            (house_id, current_user_id)
+        )
+        
+        if cur.rowcount == 0:
+            return jsonify({'error': '이미 나간 집입니다'}), 404
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({'message': '집에서 나갔습니다'}), 200
         
     except Exception as e:
         if conn:
