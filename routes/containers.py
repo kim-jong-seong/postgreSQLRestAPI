@@ -283,9 +283,7 @@ def create_container(current_user_id, house_id):
         # ============================================
         # container_logs 기록 추가 (반입)
         # ============================================
-        log_remk_parts = [f"생성: {name}"]
-        if parent_id:
-            log_remk_parts.append(f"위치: {parent_id}")
+        log_remk = f"{name} 생성"
         
         cur.execute(
             """
@@ -295,7 +293,7 @@ def create_container(current_user_id, house_id):
             VALUES (%s, 'COM1300001', %s, %s, %s, %s, %s, %s, %s)
             """,
             (container['id'], parent_id, quantity, owner_user_id, 
-             remk, ', '.join(log_remk_parts), current_user_id, current_user_id)
+             remk, log_remk, current_user_id, current_user_id)
         )
         
         conn.commit()
@@ -419,7 +417,7 @@ def update_container(current_user_id, house_id, container_id):
         # ============================================
         cur.execute(
             """
-            SELECT up_container_id, quantity, owner_user_id, remk
+            SELECT name, up_container_id, quantity, owner_user_id, remk
             FROM containers
             WHERE id = %s AND house_id = %s
             """,
@@ -486,12 +484,25 @@ def update_container(current_user_id, house_id, container_id):
             )
         
         # 4. 이름이나 메모 변경 시 일반 수정 로그
-        if 'name' in data or ('remk' in data and data['remk'] != original.get('remk')):
+        # 단, 수량이나 소유자만 변경된 경우는 제외
+        quantity_changed = 'quantity' in data and data['quantity'] != original.get('quantity')
+        owner_changed = 'owner_user_id' in data and data['owner_user_id'] != original.get('owner_user_id')
+        name_changed = 'name' in data and data['name'] != original.get('name')
+        remk_changed = 'remk' in data and data['remk'] != original.get('remk')
+        
+        # 이름이나 메모가 실제로 변경된 경우만 수정 로그 생성
+        if name_changed or remk_changed:
             log_remk = []
-            if 'name' in data:
-                log_remk.append(f"이름 변경")
-            if 'remk' in data and data['remk'] != original.get('remk'):
-                log_remk.append(f"메모: {original.get('remk', '')} → {data['remk']}")
+            
+            # 이름 변경: "이름 변경: aaa → bbb"
+            if name_changed:
+                log_remk.append(f"이름 변경: {original.get('name', '')} → {data['name']}")
+            
+            # 메모 변경: "메모: None → 1"
+            if remk_changed:
+                from_remk = original.get('remk') or 'None'
+                to_remk = data['remk'] or 'None'
+                log_remk.append(f"메모: {from_remk} → {to_remk}")
             
             cur.execute(
                 """
