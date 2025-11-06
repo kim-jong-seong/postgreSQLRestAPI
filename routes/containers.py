@@ -480,16 +480,16 @@ def search_containers(current_user_id, house_id):
             conn.close()
             return jsonify({'error': '접근 권한이 없습니다'}), 403
         
-        # 검색 쿼리 구성
+        # 검색 쿼리 구성 - ARRAY 타입 명시적 캐스팅
         sql = """
             WITH RECURSIVE parent_path AS (
-                SELECT id, name, up_container_id, ARRAY[name] as path
+                SELECT id, name, up_container_id, ARRAY[name::text] as path
                 FROM containers
                 WHERE house_id = %s AND up_container_id IS NULL
                 
                 UNION ALL
                 
-                SELECT c.id, c.name, c.up_container_id, pp.path || c.name
+                SELECT c.id, c.name, c.up_container_id, pp.path || c.name::text
                 FROM containers c
                 JOIN parent_path pp ON c.up_container_id = pp.id
                 WHERE c.house_id = %s
