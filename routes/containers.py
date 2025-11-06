@@ -281,7 +281,7 @@ def create_container(current_user_id, house_id):
         container = cur.fetchone()
         
         # ============================================
-        # container_logs 기록 추가 (반입)
+        # container_logs 기록 추가 (생성)
         # ============================================
         log_remk = f"{name} 생성"
         
