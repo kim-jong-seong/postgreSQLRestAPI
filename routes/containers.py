@@ -35,42 +35,23 @@ def get_containers(current_user_id, house_id):
         parent_id = request.args.get('parent_id')
         
         if level == 'root':
-            # 최상위 영역들 조회
+            # 최상위 영역들 조회 (상세 정보 포함)
             cur.execute(
                 """
                 SELECT 
                     c.id,
                     c.name,
-                    c.type_cd,
-                    cd.nm as type_nm,
-                    c.created_at,
-                    (SELECT COUNT(*) 
-                     FROM containers 
-                     WHERE up_container_id = c.id 
-                     AND house_id = %s) as child_count
-                FROM containers c
-                LEFT JOIN com_code_d cd ON c.type_cd = cd.cd
-                WHERE c.house_id = %s 
-                  AND c.up_container_id IS NULL
-                ORDER BY c.name
-                """,
-                (house_id, house_id)
-            )
-        elif parent_id:
-            # 특정 부모의 자식들 조회
-            cur.execute(
-                """
-                SELECT 
-                    c.id,
-                    c.name,
-                    c.type_cd,
-                    cd.nm as type_nm,
+                    c.house_id,
                     c.up_container_id,
+                    c.type_cd,
+                    cd.nm as type_nm,
                     c.quantity,
                     c.remk,
                     c.owner_user_id,
                     u.name as owner_name,
                     c.created_at,
+                    c.created_user,
+                    creator.name as creator_name,
                     (SELECT COUNT(*) 
                      FROM containers 
                      WHERE up_container_id = c.id 
@@ -78,6 +59,39 @@ def get_containers(current_user_id, house_id):
                 FROM containers c
                 LEFT JOIN com_code_d cd ON c.type_cd = cd.cd
                 LEFT JOIN users u ON c.owner_user_id = u.id
+                LEFT JOIN users creator ON c.created_user = creator.id
+                WHERE c.house_id = %s 
+                  AND c.up_container_id IS NULL
+                ORDER BY c.name
+                """,
+                (house_id, house_id)
+            )
+        elif parent_id:
+            # 특정 부모의 자식들 조회 (상세 정보 포함)
+            cur.execute(
+                """
+                SELECT 
+                    c.id,
+                    c.name,
+                    c.house_id,
+                    c.up_container_id,
+                    c.type_cd,
+                    cd.nm as type_nm,
+                    c.quantity,
+                    c.remk,
+                    c.owner_user_id,
+                    u.name as owner_name,
+                    c.created_at,
+                    c.created_user,
+                    creator.name as creator_name,
+                    (SELECT COUNT(*) 
+                     FROM containers 
+                     WHERE up_container_id = c.id 
+                     AND house_id = %s) as child_count
+                FROM containers c
+                LEFT JOIN com_code_d cd ON c.type_cd = cd.cd
+                LEFT JOIN users u ON c.owner_user_id = u.id
+                LEFT JOIN users creator ON c.created_user = creator.id
                 WHERE c.house_id = %s 
                   AND c.up_container_id = %s
                 ORDER BY c.type_cd, c.name
