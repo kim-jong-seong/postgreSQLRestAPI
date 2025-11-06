@@ -683,3 +683,97 @@ def search_containers(current_user_id, house_id):
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# 7. 컨테이너 히스토리 조회
+@containers_bp.route('/<house_id>/containers/<container_id>/logs', methods=['GET'])
+@token_required
+def get_container_logs(current_user_id, house_id, container_id):
+    """
+    특정 컨테이너의 변경 이력 조회
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 권한 확인
+        cur.execute(
+            "SELECT role_cd FROM house_members WHERE house_id = %s AND user_id = %s",
+            (house_id, current_user_id)
+        )
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return jsonify({'error': '접근 권한이 없습니다'}), 403
+        
+        # 컨테이너 존재 확인
+        cur.execute(
+            "SELECT id FROM containers WHERE id = %s AND house_id = %s",
+            (container_id, house_id)
+        )
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
+        
+        # 히스토리 조회 (상세 정보 포함)
+        cur.execute(
+            """
+            SELECT 
+                cl.id,
+                cl.container_id,
+                cl.act_cd,
+                cd.nm as act_nm,
+                
+                -- 위치 정보
+                cl.from_container_id,
+                fc.name as from_container_name,
+                cl.to_container_id,
+                tc.name as to_container_name,
+                
+                -- 소유자 정보
+                cl.from_owner_user_id,
+                fo.name as from_owner_name,
+                cl.to_owner_user_id,
+                tou.name as to_owner_name,
+                
+                -- 수량 정보
+                cl.from_quantity,
+                cl.to_quantity,
+                
+                -- 메모 정보
+                cl.from_remk,
+                cl.to_remk,
+                
+                -- 기타
+                cl.log_remk,
+                cl.created_at,
+                cl.created_user,
+                creator.name as creator_name
+                
+            FROM container_logs cl
+            LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
+            LEFT JOIN containers fc ON cl.from_container_id = fc.id
+            LEFT JOIN containers tc ON cl.to_container_id = tc.id
+            LEFT JOIN users fo ON cl.from_owner_user_id = fo.id
+            LEFT JOIN users tou ON cl.to_owner_user_id = tou.id
+            LEFT JOIN users creator ON cl.created_user = creator.id
+            
+            WHERE cl.container_id = %s
+            ORDER BY cl.created_at DESC
+            """,
+            (container_id,)
+        )
+        
+        logs = cur.fetchall()
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'logs': logs,
+            'count': len(logs)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
