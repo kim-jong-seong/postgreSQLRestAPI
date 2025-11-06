@@ -445,73 +445,86 @@ def update_container(current_user_id, house_id, container_id):
         # container_logs 기록 추가
         # ============================================
         
-        # 변경 내용에 따라 로그 생성
+        # 변경 내용 체크
+        location_changed = 'up_container_id' in data and data['up_container_id'] != original.get('up_container_id')
+        name_changed = 'name' in data and data['name'] != original.get('name')
+        quantity_changed = 'quantity' in data and data['quantity'] != original.get('quantity')
+        owner_changed = 'owner_user_id' in data and data['owner_user_id'] != original.get('owner_user_id')
+        remk_changed = 'remk' in data and data['remk'] != original.get('remk')
         
-        # 1. 위치 이동 로그
-        if 'up_container_id' in data and data['up_container_id'] != original['up_container_id']:
+        # 1. 위치 이동만 변경된 경우 - 이동 로그
+        if location_changed and not (name_changed or quantity_changed or owner_changed or remk_changed):
             cur.execute(
                 """
                 INSERT INTO container_logs 
                 (container_id, act_cd, from_container_id, to_container_id, created_user, updated_user)
                 VALUES (%s, 'COM1300003', %s, %s, %s, %s)
                 """,
-                (container_id, original['up_container_id'], data['up_container_id'], 
+                (container_id, original.get('up_container_id'), data['up_container_id'], 
                  current_user_id, current_user_id)
             )
         
-        # 2. 수량 변경 로그
-        if 'quantity' in data and data['quantity'] != original.get('quantity'):
-            cur.execute(
-                """
-                INSERT INTO container_logs 
-                (container_id, act_cd, from_quantity, to_quantity, created_user, updated_user)
-                VALUES (%s, 'COM1300005', %s, %s, %s, %s)
-                """,
-                (container_id, original.get('quantity'), data['quantity'], 
-                 current_user_id, current_user_id)
-            )
-        
-        # 3. 소유자 변경 로그
-        if 'owner_user_id' in data and data['owner_user_id'] != original.get('owner_user_id'):
-            cur.execute(
-                """
-                INSERT INTO container_logs 
-                (container_id, act_cd, from_owner_user_id, to_owner_user_id, created_user, updated_user)
-                VALUES (%s, 'COM1300006', %s, %s, %s, %s)
-                """,
-                (container_id, original.get('owner_user_id'), data['owner_user_id'], 
-                 current_user_id, current_user_id)
-            )
-        
-        # 4. 이름이나 메모 변경 시 일반 수정 로그
-        # 단, 수량이나 소유자만 변경된 경우는 제외
-        quantity_changed = 'quantity' in data and data['quantity'] != original.get('quantity')
-        owner_changed = 'owner_user_id' in data and data['owner_user_id'] != original.get('owner_user_id')
-        name_changed = 'name' in data and data['name'] != original.get('name')
-        remk_changed = 'remk' in data and data['remk'] != original.get('remk')
-        
-        # 이름이나 메모가 실제로 변경된 경우만 수정 로그 생성
-        if name_changed or remk_changed:
-            log_remk = []
+        # 2. 위치 이동 외 변경사항이 있으면 - 통합 수정 로그
+        elif name_changed or quantity_changed or owner_changed or remk_changed or location_changed:
+            log_parts = []
             
-            # 이름 변경: "이름 변경: aaa → bbb"
+            # 위치 변경
+            if location_changed:
+                log_parts.append(f"위치 이동")
+            
+            # 이름 변경
             if name_changed:
-                log_remk.append(f"이름 변경: {original.get('name', '')} → {data['name']}")
+                log_parts.append(f"이름 변경: {original.get('name', '')} → {data['name']}")
             
-            # 메모 변경: "메모: None → 1"
+            # 수량 변경
+            if quantity_changed:
+                log_parts.append(f"수량 변경: {original.get('quantity', 0)}개 → {data['quantity']}개")
+            
+            # 소유자 변경
+            if owner_changed:
+                # 소유자 이름 조회
+                from_owner_name = None
+                to_owner_name = None
+                
+                if original.get('owner_user_id'):
+                    cur.execute("SELECT name FROM users WHERE id = %s", (original['owner_user_id'],))
+                    from_owner = cur.fetchone()
+                    from_owner_name = from_owner['name'] if from_owner else None
+                
+                if data.get('owner_user_id'):
+                    cur.execute("SELECT name FROM users WHERE id = %s", (data['owner_user_id'],))
+                    to_owner = cur.fetchone()
+                    to_owner_name = to_owner['name'] if to_owner else None
+                
+                from_text = from_owner_name or '없음'
+                to_text = to_owner_name or '없음'
+                log_parts.append(f"소유자 변경: {from_text} → {to_text}")
+            
+            # 메모 변경
             if remk_changed:
-                from_remk = original.get('remk') or 'None'
-                to_remk = data['remk'] or 'None'
-                log_remk.append(f"메모: {from_remk} → {to_remk}")
+                from_remk = original.get('remk') or '없음'
+                to_remk = data.get('remk') or '없음'
+                log_parts.append(f"메모 변경: {from_remk} → {to_remk}")
             
+            # 통합 수정 로그 생성
             cur.execute(
                 """
                 INSERT INTO container_logs 
-                (container_id, act_cd, from_remk, to_remk, log_remk, created_user, updated_user)
-                VALUES (%s, 'COM1300004', %s, %s, %s, %s, %s)
+                (container_id, act_cd, from_container_id, to_container_id,
+                 from_quantity, to_quantity, from_owner_user_id, to_owner_user_id,
+                 from_remk, to_remk, log_remk, created_user, updated_user)
+                VALUES (%s, 'COM1300004', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (container_id, original.get('remk'), data.get('remk'), 
-                 ', '.join(log_remk) if log_remk else None,
+                (container_id, 
+                 original.get('up_container_id') if location_changed else None,
+                 data.get('up_container_id') if location_changed else None,
+                 original.get('quantity') if quantity_changed else None,
+                 data.get('quantity') if quantity_changed else None,
+                 original.get('owner_user_id') if owner_changed else None,
+                 data.get('owner_user_id') if owner_changed else None,
+                 original.get('remk') if remk_changed else None,
+                 data.get('remk') if remk_changed else None,
+                 '\n'.join(log_parts),
                  current_user_id, current_user_id)
             )
         
