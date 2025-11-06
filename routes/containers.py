@@ -62,7 +62,7 @@ def get_containers(current_user_id, house_id):
                 LEFT JOIN users creator ON c.created_user = creator.id
                 WHERE c.house_id = %s 
                   AND c.up_container_id IS NULL
-                ORDER BY c.name
+                ORDER BY c.type_cd, c.name
                 """,
                 (house_id, house_id)
             )
