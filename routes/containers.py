@@ -255,30 +255,34 @@ def create_container(current_user_id, house_id):
                 return jsonify({'error': '부모 컨테이너를 찾을 수 없습니다'}), 404
         
         # 컨테이너 생성
-        if type_cd == 'COM1200003':
-            # 물품
-            cur.execute(
-                """
-                INSERT INTO containers 
-                (house_id, up_container_id, type_cd, name, quantity, remk, owner_user_id, created_user, updated_user)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, name, created_at
-                """,
-                (house_id, parent_id, type_cd, name, quantity, remk, owner_user_id, current_user_id, current_user_id)
-            )
-        else:
-            # 영역/박스
-            cur.execute(
-                """
-                INSERT INTO containers 
-                (house_id, up_container_id, type_cd, name, created_user, updated_user)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING id, name, created_at
-                """,
-                (house_id, parent_id, type_cd, name, current_user_id, current_user_id)
-            )
-        
+        cur.execute(
+            """
+            INSERT INTO containers 
+            (house_id, up_container_id, type_cd, name, quantity, owner_user_id, remk, created_user, updated_user)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, name, type_cd, created_at
+            """,
+            (house_id, parent_id, type_cd, name, quantity, owner_user_id, remk, current_user_id, current_user_id)
+        )
         container = cur.fetchone()
+        
+        # ============================================
+        # container_logs 기록 추가 (반입)
+        # ============================================
+        log_remk_parts = [f"생성: {name}"]
+        if parent_id:
+            log_remk_parts.append(f"위치: {parent_id}")
+        
+        cur.execute(
+            """
+            INSERT INTO container_logs 
+            (container_id, act_cd, to_container_id, to_quantity, to_owner_user_id, 
+             to_remk, log_remk, created_user, updated_user)
+            VALUES (%s, 'COM1300001', %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (container['id'], parent_id, quantity, owner_user_id, 
+             remk, ', '.join(log_remk_parts), current_user_id, current_user_id)
+        )
         
         conn.commit()
         cur.close()
@@ -295,7 +299,7 @@ def create_container(current_user_id, house_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 4. 컨테이너 수정
+# 4. 컨테이너 수정 (up_container_id 이동 기능 추가됨)
 @containers_bp.route('/<house_id>/containers/<container_id>', methods=['PATCH'])
 @token_required
 def update_container(current_user_id, house_id, container_id):
@@ -303,6 +307,7 @@ def update_container(current_user_id, house_id, container_id):
     Request Body:
     {
         "name": "새 이름" (optional),
+        "up_container_id": "C202500002" (optional, 다른 위치로 이동),
         "quantity": 2 (물품일 때만, optional),
         "owner_user_id": "0000000001" (물품일 때만, optional),
         "remk": "메모" (물품일 때만, optional)
@@ -344,6 +349,34 @@ def update_container(current_user_id, house_id, container_id):
             update_fields.append("name = %s")
             params.append(data['name'])
         
+        # up_container_id 수정 (이동 기능) - 새로 추가된 부분
+        if 'up_container_id' in data:
+            # 부모 컨테이너 유효성 검사
+            new_parent_id = data['up_container_id']
+            if new_parent_id is not None:
+                cur.execute(
+                    "SELECT id, type_cd FROM containers WHERE id = %s AND house_id = %s",
+                    (new_parent_id, house_id)
+                )
+                parent = cur.fetchone()
+                if not parent:
+                    cur.close()
+                    conn.close()
+                    return jsonify({'error': '부모 컨테이너를 찾을 수 없습니다'}), 404
+                # 물품은 물품 안에 들어갈 수 없음
+                if parent['type_cd'] == 'COM1200003':
+                    cur.close()
+                    conn.close()
+                    return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
+                # 자기 자신의 하위로 이동 불가 (순환 참조 방지)
+                if new_parent_id == container_id:
+                    cur.close()
+                    conn.close()
+                    return jsonify({'error': '자기 자신의 하위로 이동할 수 없습니다'}), 400
+            
+            update_fields.append("up_container_id = %s")
+            params.append(new_parent_id)
+        
         # 물품일 때만 추가 필드 수정 가능
         if container['type_cd'] == 'COM1200003':
             if 'quantity' in data:
@@ -367,6 +400,19 @@ def update_container(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '수정할 내용이 없습니다'}), 400
         
+        # ============================================
+        # 원본 데이터 조회 (로그용) - UPDATE 전에 조회!
+        # ============================================
+        cur.execute(
+            """
+            SELECT up_container_id, quantity, owner_user_id, remk
+            FROM containers
+            WHERE id = %s AND house_id = %s
+            """,
+            (container_id, house_id)
+        )
+        original = cur.fetchone()
+        
         # updated_user 추가
         update_fields.append("updated_user = %s")
         params.append(current_user_id)
@@ -382,6 +428,67 @@ def update_container(current_user_id, house_id, container_id):
         
         cur.execute(query, params)
         updated = cur.fetchone()
+        
+        # ============================================
+        # container_logs 기록 추가
+        # ============================================
+        
+        # 변경 내용에 따라 로그 생성
+        
+        # 1. 위치 이동 로그
+        if 'up_container_id' in data and data['up_container_id'] != original['up_container_id']:
+            cur.execute(
+                """
+                INSERT INTO container_logs 
+                (container_id, act_cd, from_container_id, to_container_id, created_user, updated_user)
+                VALUES (%s, 'COM1300003', %s, %s, %s, %s)
+                """,
+                (container_id, original['up_container_id'], data['up_container_id'], 
+                 current_user_id, current_user_id)
+            )
+        
+        # 2. 수량 변경 로그
+        if 'quantity' in data and data['quantity'] != original.get('quantity'):
+            cur.execute(
+                """
+                INSERT INTO container_logs 
+                (container_id, act_cd, from_quantity, to_quantity, created_user, updated_user)
+                VALUES (%s, 'COM1300005', %s, %s, %s, %s)
+                """,
+                (container_id, original.get('quantity'), data['quantity'], 
+                 current_user_id, current_user_id)
+            )
+        
+        # 3. 소유자 변경 로그
+        if 'owner_user_id' in data and data['owner_user_id'] != original.get('owner_user_id'):
+            cur.execute(
+                """
+                INSERT INTO container_logs 
+                (container_id, act_cd, from_owner_user_id, to_owner_user_id, created_user, updated_user)
+                VALUES (%s, 'COM1300006', %s, %s, %s, %s)
+                """,
+                (container_id, original.get('owner_user_id'), data['owner_user_id'], 
+                 current_user_id, current_user_id)
+            )
+        
+        # 4. 이름이나 메모 변경 시 일반 수정 로그
+        if 'name' in data or ('remk' in data and data['remk'] != original.get('remk')):
+            log_remk = []
+            if 'name' in data:
+                log_remk.append(f"이름 변경")
+            if 'remk' in data and data['remk'] != original.get('remk'):
+                log_remk.append(f"메모: {original.get('remk', '')} → {data['remk']}")
+            
+            cur.execute(
+                """
+                INSERT INTO container_logs 
+                (container_id, act_cd, from_remk, to_remk, log_remk, created_user, updated_user)
+                VALUES (%s, 'COM1300004', %s, %s, %s, %s, %s)
+                """,
+                (container_id, original.get('remk'), data.get('remk'), 
+                 ', '.join(log_remk) if log_remk else None,
+                 current_user_id, current_user_id)
+            )
         
         conn.commit()
         cur.close()
@@ -419,9 +526,13 @@ def delete_container(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '접근 권한이 없습니다'}), 403
         
-        # 컨테이너 존재 확인
+        # 컨테이너 존재 확인 및 상세 정보 조회
         cur.execute(
-            "SELECT name FROM containers WHERE id = %s AND house_id = %s",
+            """
+            SELECT name, up_container_id, quantity, owner_user_id, remk
+            FROM containers 
+            WHERE id = %s AND house_id = %s
+            """,
             (container_id, house_id)
         )
         container = cur.fetchone()
@@ -430,6 +541,25 @@ def delete_container(current_user_id, house_id, container_id):
             cur.close()
             conn.close()
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
+        
+        # ============================================
+        # container_logs 기록 추가 (반출) - 삭제 전에 기록
+        # ============================================
+        log_remk = f"삭제: {container['name']}"
+        if container['up_container_id']:
+            log_remk += f", 위치: {container['up_container_id']}"
+        
+        cur.execute(
+            """
+            INSERT INTO container_logs 
+            (container_id, act_cd, from_container_id, from_quantity, from_owner_user_id,
+             from_remk, log_remk, created_user, updated_user)
+            VALUES (%s, 'COM1300002', %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (container_id, container['up_container_id'], container.get('quantity'), 
+             container.get('owner_user_id'), container.get('remk'), log_remk,
+             current_user_id, current_user_id)
+        )
         
         # 삭제
         cur.execute(
