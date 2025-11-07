@@ -197,12 +197,38 @@ def get_container_detail(current_user_id, house_id, container_id):
         )
         path = cur.fetchall()
         
+        # 하위 항목 미리보기 (영역/박스만, 최대 3개)
+        child_preview = []
+        if container['type_cd'] in ['COM1200001', 'COM1200002']:  # 영역 또는 박스
+            cur.execute(
+                """
+                SELECT 
+                    c.id,
+                    c.name,
+                    c.type_cd,
+                    cd.nm as type_nm,
+                    c.quantity,
+                    c.owner_user_id,
+                    u.name as owner_name
+                FROM containers c
+                LEFT JOIN com_code_d cd ON c.type_cd = cd.cd
+                LEFT JOIN users u ON c.owner_user_id = u.id
+                WHERE c.up_container_id = %s 
+                  AND c.house_id = %s
+                ORDER BY c.type_cd, c.name
+                LIMIT 3
+                """,
+                (container_id, house_id)
+            )
+            child_preview = cur.fetchall()
+        
         cur.close()
         conn.close()
         
         return jsonify({
             'container': container,
-            'path': path
+            'path': path,
+            'child_preview': child_preview
         }), 200
         
     except Exception as e:
