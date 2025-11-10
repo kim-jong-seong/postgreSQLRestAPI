@@ -304,6 +304,10 @@ CREATE TABLE container_logs (
     from_container_id VARCHAR(11),
     to_container_id VARCHAR(11),
     
+    
+    -- 집 변경 (집 간 이동 시)
+    from_house_id VARCHAR(11),
+    to_house_id VARCHAR(11),
     -- 소유자 변경
     from_owner_user_id VARCHAR(10),
     to_owner_user_id VARCHAR(10),
@@ -328,6 +332,8 @@ CREATE TABLE container_logs (
     FOREIGN KEY (act_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
     FOREIGN KEY (from_container_id) REFERENCES containers(id) ON DELETE SET NULL,
     FOREIGN KEY (to_container_id) REFERENCES containers(id) ON DELETE SET NULL,
+    FOREIGN KEY (from_house_id) REFERENCES houses(id) ON DELETE SET NULL,
+    FOREIGN KEY (to_house_id) REFERENCES houses(id) ON DELETE SET NULL,
     FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
     FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
 );
@@ -368,6 +374,8 @@ CREATE INDEX idx_containers_owner ON containers(owner_user_id) WHERE owner_user_
 CREATE INDEX idx_containers_parent_type ON containers(up_container_id, type_cd);
 CREATE INDEX idx_container_logs_container ON container_logs(container_id);
 CREATE INDEX idx_container_logs_created ON container_logs(created_at);
+CREATE INDEX idx_container_logs_from_house ON container_logs(from_house_id) WHERE from_house_id IS NOT NULL;
+CREATE INDEX idx_container_logs_to_house ON container_logs(to_house_id) WHERE to_house_id IS NOT NULL;
 
 -- ============================================
 -- 코멘트
@@ -388,6 +396,8 @@ COMMENT ON COLUMN containers.quantity IS '수량 (물품일 때만 사용)';
 COMMENT ON COLUMN containers.remk IS '메모 (물품일 때만 사용)';
 COMMENT ON COLUMN containers.owner_user_id IS '소유자 (물품일 때만 사용)';
 COMMENT ON COLUMN house_members.seq IS '집 내 구성원 순번 (자동 증가)';
+COMMENT ON COLUMN container_logs.from_house_id IS '출발 집 (집 간 이동 시)';
+COMMENT ON COLUMN container_logs.to_house_id IS '도착 집 (집 간 이동 시)';
 
 -- ============================================
 -- 공통코드 초기 데이터 (관리자 계정보다 먼저!)
