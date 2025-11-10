@@ -403,8 +403,6 @@ def update_container(current_user_id, house_id, container_id):
                 return jsonify({'error': '대상 집에 대한 권한이 없습니다'}), 403
             
             house_changed = True
-            # 집 간 이동 시 up_container_id는 자동으로 null (대상 집 최상위)
-            data['up_container_id'] = None
         
         # 업데이트할 필드 구성
         update_fields = []
@@ -424,27 +422,27 @@ def update_container(current_user_id, house_id, container_id):
             # 부모 컨테이너 유효성 검사
             new_parent_id = data['up_container_id']
             if new_parent_id is not None:
-                # 집 간 이동이 아닐 때만 부모 검증
-                if not house_changed:
-                    cur.execute(
-                        "SELECT id, type_cd FROM containers WHERE id = %s AND house_id = %s",
-                        (new_parent_id, house_id if not house_changed else target_house_id)
-                    )
-                    parent = cur.fetchone()
-                    if not parent:
-                        cur.close()
-                        conn.close()
-                        return jsonify({'error': '부모 컨테이너를 찾을 수 없습니다'}), 404
-                    # 물품은 물품 안에 들어갈 수 없음
-                    if parent['type_cd'] == 'COM1200003':
-                        cur.close()
-                        conn.close()
-                        return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
-                    # 자기 자신의 하위로 이동 불가 (순환 참조 방지)
-                    if new_parent_id == container_id:
-                        cur.close()
-                        conn.close()
-                        return jsonify({'error': '자기 자신의 하위로 이동할 수 없습니다'}), 400
+                # 검증할 house_id 결정 (집 간 이동이면 대상 집, 아니면 현재 집)
+                check_house_id = target_house_id if house_changed else house_id
+                cur.execute(
+                    "SELECT id, type_cd FROM containers WHERE id = %s AND house_id = %s",
+                    (new_parent_id, check_house_id)
+                )
+                parent = cur.fetchone()
+                if not parent:
+                    cur.close()
+                    conn.close()
+                    return jsonify({'error': '부모 컨테이너를 찾을 수 없습니다'}), 404
+                # 물품은 물품 안에 들어갈 수 없음
+                if parent['type_cd'] == 'COM1200003':
+                    cur.close()
+                    conn.close()
+                    return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
+                # 자기 자신의 하위로 이동 불가 (순환 참조 방지)
+                if new_parent_id == container_id:
+                    cur.close()
+                    conn.close()
+                    return jsonify({'error': '자기 자신의 하위로 이동할 수 없습니다'}), 400
             
             update_fields.append("up_container_id = %s")
             params.append(new_parent_id)
@@ -648,15 +646,6 @@ def update_container(current_user_id, house_id, container_id):
         return jsonify({
             'message': '수정 성공' if not house_changed else '집 이동 성공',
             'container': result
-        }), 200
-        
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        return jsonify({'error': str(e)}), 500
-        return jsonify({
-            'message': '컨테이너가 수정되었습니다',
-            'container': updated
         }), 200
         
     except Exception as e:
@@ -871,6 +860,12 @@ def get_container_logs(current_user_id, house_id, container_id):
                 cl.act_cd,
                 cd.nm as act_nm,
                 
+                
+                -- 집 정보
+                cl.from_house_id,
+                fh.name as from_house_name,
+                cl.to_house_id,
+                th.name as to_house_name,
                 -- 위치 정보
                 cl.from_container_id,
                 fc.name as from_container_name,
@@ -899,6 +894,8 @@ def get_container_logs(current_user_id, house_id, container_id):
                 
             FROM container_logs cl
             LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
+            LEFT JOIN houses fh ON cl.from_house_id = fh.id
+            LEFT JOIN houses th ON cl.to_house_id = th.id
             LEFT JOIN containers fc ON cl.from_container_id = fc.id
             LEFT JOIN containers tc ON cl.to_container_id = tc.id
             LEFT JOIN users fo ON cl.from_owner_user_id = fo.id
