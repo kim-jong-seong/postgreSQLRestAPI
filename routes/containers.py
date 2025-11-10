@@ -338,18 +338,17 @@ def create_container(current_user_id, house_id):
 
 
 # 4. 컨테이너 수정 (up_container_id 이동 기능 추가됨)
-@containers_bp.route('/<house_id>/containers/<container_id>', methods=['PATCH'])
-@token_required
 # 4. 컨테이너 수정 (이름, 위치, 수량, 메모, 소유자 등)
 @containers_bp.route('/<house_id>/containers/<container_id>', methods=['PATCH'])
 @token_required
 def update_container(current_user_id, house_id, container_id):
     """
-    컨테이너 정보 수정
-    - 집 간 이동: target_house_id 포함
+    컨테이너 정보 수정 (이름, up_container_id, 수량, 메모, 소유자)
+    - 집 간 이동 기능 포함 (target_house_id)
     """
+    conn = None
     try:
-        data = request.json
+        data = request.get_json()
         
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -364,9 +363,14 @@ def update_container(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '접근 권한이 없습니다'}), 403
         
-        # 컨테이너 존재 확인
+        # 컨테이너 정보 조회
         cur.execute(
-            "SELECT type_cd FROM containers WHERE id = %s AND house_id = %s",
+            """
+            SELECT c.*, cd.nm as type_nm
+            FROM containers c
+            LEFT JOIN com_code_d cd ON c.type_cd = cd.cd
+            WHERE c.id = %s AND c.house_id = %s
+            """,
             (container_id, house_id)
         )
         container = cur.fetchone()
@@ -376,12 +380,14 @@ def update_container(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
         
-        # 집 간 이동 체크
+        # ============================================
+        # 집 간 이동 처리
+        # ============================================
         target_house_id = data.get('target_house_id')
-        is_cross_house = target_house_id and target_house_id != house_id
+        house_changed = False
         
-        # 집 간 이동이면 대상 집 권한 확인
-        if is_cross_house:
+        if target_house_id and target_house_id != house_id:
+            # 대상 집의 멤버인지 확인
             cur.execute(
                 "SELECT role_cd FROM house_members WHERE house_id = %s AND user_id = %s",
                 (target_house_id, current_user_id)
@@ -390,6 +396,8 @@ def update_container(current_user_id, house_id, container_id):
                 cur.close()
                 conn.close()
                 return jsonify({'error': '대상 집에 대한 권한이 없습니다'}), 403
+            
+            house_changed = True
         
         # 업데이트할 필드 구성
         update_fields = []
@@ -400,16 +408,17 @@ def update_container(current_user_id, house_id, container_id):
             params.append(data['name'])
         
         # 집 변경
-        if is_cross_house:
+        if house_changed:
             update_fields.append("house_id = %s")
             params.append(target_house_id)
         
         # up_container_id 수정 (이동 기능)
         if 'up_container_id' in data:
+            # 부모 컨테이너 유효성 검사
             new_parent_id = data['up_container_id']
             if new_parent_id is not None:
-                # 부모 컨테이너 검증 (집 간 이동이면 대상 집에서 찾기)
-                check_house_id = target_house_id if is_cross_house else house_id
+                # 검증할 house_id 결정 (집 간 이동이면 대상 집, 아니면 현재 집)
+                check_house_id = target_house_id if house_changed else house_id
                 cur.execute(
                     "SELECT id, type_cd FROM containers WHERE id = %s AND house_id = %s",
                     (new_parent_id, check_house_id)
@@ -419,15 +428,13 @@ def update_container(current_user_id, house_id, container_id):
                     cur.close()
                     conn.close()
                     return jsonify({'error': '부모 컨테이너를 찾을 수 없습니다'}), 404
-                
                 # 물품은 물품 안에 들어갈 수 없음
                 if parent['type_cd'] == 'COM1200003':
                     cur.close()
                     conn.close()
                     return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
-                
-                # 순환 참조 방지 (같은 집 내에서만)
-                if not is_cross_house and new_parent_id == container_id:
+                # 자기 자신의 하위로 이동 불가 (순환 참조 방지)
+                if new_parent_id == container_id:
                     cur.close()
                     conn.close()
                     return jsonify({'error': '자기 자신의 하위로 이동할 수 없습니다'}), 400
@@ -450,7 +457,7 @@ def update_container(current_user_id, house_id, container_id):
                 if owner_id:
                     cur.execute(
                         "SELECT id FROM house_members WHERE house_id = %s AND user_id = %s",
-                        (house_id, owner_id)
+                        (house_id if not house_changed else target_house_id, owner_id)
                     )
                     if not cur.fetchone():
                         cur.close()
@@ -465,6 +472,9 @@ def update_container(current_user_id, house_id, container_id):
             cur.close()
             conn.close()
             return jsonify({'error': '수정할 필드가 없습니다'}), 400
+        
+        # 수정 전 값 저장 (로그용)
+        before_values = dict(container)
         
         # UPDATE 쿼리 실행
         update_fields.append("updated_at = CURRENT_TIMESTAMP")
@@ -482,21 +492,120 @@ def update_container(current_user_id, house_id, container_id):
         cur.execute(update_query, params)
         updated = cur.fetchone()
         
-        # 집 간 이동이면 하위 항목들도 house_id 변경
-        if is_cross_house:
+        # ============================================
+        # 하위 항목 일괄 처리 (집 변경 시)
+        # ============================================
+        child_count = 0
+        if house_changed:
             cur.execute(
                 """
                 WITH RECURSIVE children AS (
-                    SELECT id FROM containers WHERE up_container_id = %s
+                    SELECT id, house_id FROM containers WHERE up_container_id = %s
                     UNION ALL
-                    SELECT c.id FROM containers c
+                    SELECT c.id, c.house_id FROM containers c
                     INNER JOIN children ch ON c.up_container_id = ch.id
                 )
                 UPDATE containers
                 SET house_id = %s, updated_at = CURRENT_TIMESTAMP, updated_user = %s
                 WHERE id IN (SELECT id FROM children)
+                RETURNING id
                 """,
                 (container_id, target_house_id, current_user_id)
+            )
+            child_updates = cur.fetchall()
+            child_count = len(child_updates)
+        
+        # ============================================
+        # 로그 기록
+        # ============================================
+        act_cd = None
+        log_remk = None
+        
+        # 집 변경 로그
+        if house_changed:
+            act_cd = 'COM1300003'
+            log_remk = f'하위 항목 {child_count}개 포함' if child_count > 0 else None
+            
+            cur.execute(
+                """
+                INSERT INTO container_logs (
+                    container_id, act_cd,
+                    from_house_id, to_house_id,
+                    from_container_id, to_container_id,
+                    from_owner_user_id, to_owner_user_id,
+                    from_quantity, to_quantity,
+                    from_remk, to_remk,
+                    log_remk, created_user
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    container_id, act_cd,
+                    before_values['house_id'], updated['house_id'],
+                    before_values['up_container_id'], updated['up_container_id'],
+                    before_values.get('owner_user_id'), updated.get('owner_user_id'),
+                    before_values.get('quantity'), updated.get('quantity'),
+                    before_values.get('remk'), updated.get('remk'),
+                    log_remk, current_user_id
+                )
+            )
+        
+        # 위치 변경 로그 (같은 집 내)
+        elif 'up_container_id' in data and before_values['up_container_id'] != updated['up_container_id']:
+            act_cd = 'COM1300003'
+            
+            cur.execute(
+                """
+                INSERT INTO container_logs (
+                    container_id, act_cd,
+                    from_container_id, to_container_id,
+                    from_owner_user_id, to_owner_user_id,
+                    from_quantity, to_quantity,
+                    from_remk, to_remk,
+                    created_user
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    container_id, act_cd,
+                    before_values['up_container_id'], updated['up_container_id'],
+                    before_values.get('owner_user_id'), updated.get('owner_user_id'),
+                    before_values.get('quantity'), updated.get('quantity'),
+                    before_values.get('remk'), updated.get('remk'),
+                    current_user_id
+                )
+            )
+        
+        # 기타 수정 로그
+        elif any(field in data for field in ['name', 'quantity', 'remk', 'owner_user_id']):
+            act_cd = 'COM1300004'
+            changes = []
+            if 'name' in data and before_values['name'] != updated['name']:
+                changes.append(f"이름: {before_values['name']} → {updated['name']}")
+            if 'quantity' in data and before_values.get('quantity') != updated.get('quantity'):
+                changes.append(f"수량: {before_values.get('quantity')} → {updated.get('quantity')}")
+            if 'owner_user_id' in data and before_values.get('owner_user_id') != updated.get('owner_user_id'):
+                changes.append("소유자 변경")
+            
+            log_remk = ', '.join(changes) if changes else '정보 수정'
+            
+            cur.execute(
+                """
+                INSERT INTO container_logs (
+                    container_id, act_cd,
+                    from_container_id, to_container_id,
+                    from_owner_user_id, to_owner_user_id,
+                    from_quantity, to_quantity,
+                    from_remk, to_remk,
+                    log_remk, created_user
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    container_id, act_cd,
+                    before_values['up_container_id'], updated['up_container_id'],
+                    before_values.get('owner_user_id'), updated.get('owner_user_id'),
+                    before_values.get('quantity'), updated.get('quantity'),
+                    before_values.get('remk'), updated.get('remk'),
+                    log_remk, current_user_id
+                )
             )
         
         conn.commit()
@@ -518,7 +627,7 @@ def update_container(current_user_id, house_id, container_id):
         conn.close()
         
         return jsonify({
-            'message': '수정 성공',
+            'message': '수정 성공' if not house_changed else '집 이동 성공',
             'container': result
         }), 200
         
@@ -526,6 +635,19 @@ def update_container(current_user_id, house_id, container_id):
         if conn:
             conn.rollback()
         return jsonify({'error': str(e)}), 500
+
+        return jsonify({
+            'message': '컨테이너가 수정되었습니다',
+            'container': updated
+        }), 200
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 5. 컨테이너 삭제
 @containers_bp.route('/<house_id>/containers/<container_id>', methods=['DELETE'])
 @token_required
 def delete_container(current_user_id, house_id, container_id):
@@ -731,6 +853,16 @@ def get_container_logs(current_user_id, house_id, container_id):
                 cl.act_cd,
                 cd.nm as act_nm,
                 
+                -- 현재 컨테이너가 속한 집 정보
+                c.house_id as current_house_id,
+                ch.name as current_house_name,
+                
+                -- 집 간 이동 정보
+                cl.from_house_id,
+                fh.name as from_house_name,
+                cl.to_house_id,
+                th.name as to_house_name,
+                
                 -- 위치 정보
                 cl.from_container_id,
                 fc.name as from_container_name,
@@ -758,6 +890,10 @@ def get_container_logs(current_user_id, house_id, container_id):
                 creator.name as creator_name
                 
             FROM container_logs cl
+            LEFT JOIN containers c ON cl.container_id = c.id
+            LEFT JOIN houses ch ON c.house_id = ch.id
+            LEFT JOIN houses fh ON cl.from_house_id = fh.id
+            LEFT JOIN houses th ON cl.to_house_id = th.id
             LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
             LEFT JOIN containers fc ON cl.from_container_id = fc.id
             LEFT JOIN containers tc ON cl.to_container_id = tc.id
