@@ -23,8 +23,7 @@ def get_my_houses(current_user_id):
                 cd.nm as role_nm,
                 h.created_at,
                 admin.name as admin_name,
-                member_count.count as member_count,
-                COALESCE(container_count.count, 0) as child_count
+                member_count.count as member_count
             FROM houses h
                 JOIN house_members hm ON h.id = hm.house_id
                 LEFT JOIN com_code_d cd ON hm.role_cd = cd.cd
@@ -39,12 +38,6 @@ def get_my_houses(current_user_id):
                     FROM house_members
                     GROUP BY house_id
                 ) member_count ON h.id = member_count.house_id
-                LEFT JOIN (
-                    SELECT house_id, COUNT(*) as count
-                    FROM containers
-                    WHERE parent_id IS NULL
-                    GROUP BY house_id
-                ) container_count ON h.id = container_count.house_id
             WHERE hm.user_id = %s
             ORDER BY h.id
             """,
