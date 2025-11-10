@@ -434,29 +434,31 @@ def update_container(current_user_id, house_id, container_id):
                     conn.close()
                     return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
                 
-                # 순환 참조 방지: 자기 자신 또는 자기 자신의 하위 컨테이너로 이동 불가
-                if new_parent_id == container_id:
-                    cur.close()
-                    conn.close()
-                    return jsonify({'error': '자기 자신의 하위로 이동할 수 없습니다'}), 400
-                
-                # 자신의 모든 하위 컨테이너 찾기
-                cur.execute(
-                    """
-                    WITH RECURSIVE children AS (
-                        SELECT id FROM containers WHERE up_container_id = %s
-                        UNION ALL
-                        SELECT c.id FROM containers c
-                        INNER JOIN children ch ON c.up_container_id = ch.id
+                # 순환 참조 방지 (같은 집 내에서만 체크)
+                if not house_changed:
+                    # 자기 자신으로 이동 불가
+                    if new_parent_id == container_id:
+                        cur.close()
+                        conn.close()
+                        return jsonify({'error': '자기 자신의 하위로 이동할 수 없습니다'}), 400
+                    
+                    # 자신의 모든 하위 컨테이너로 이동 불가
+                    cur.execute(
+                        """
+                        WITH RECURSIVE children AS (
+                            SELECT id FROM containers WHERE up_container_id = %s
+                            UNION ALL
+                            SELECT c.id FROM containers c
+                            INNER JOIN children ch ON c.up_container_id = ch.id
+                        )
+                        SELECT id FROM children WHERE id = %s
+                        """,
+                        (container_id, new_parent_id)
                     )
-                    SELECT id FROM children WHERE id = %s
-                    """,
-                    (container_id, new_parent_id)
-                )
-                if cur.fetchone():
-                    cur.close()
-                    conn.close()
-                    return jsonify({'error': '하위 항목을 상위로 이동할 수 없습니다'}), 400
+                    if cur.fetchone():
+                        cur.close()
+                        conn.close()
+                        return jsonify({'error': '하위 항목을 상위로 이동할 수 없습니다'}), 400
             
             update_fields.append("up_container_id = %s")
             params.append(new_parent_id)
