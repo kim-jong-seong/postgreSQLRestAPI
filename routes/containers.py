@@ -756,15 +756,24 @@ def get_container_logs(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '접근 권한이 없습니다'}), 403
         
-        # 컨테이너 존재 확인
+        # 컨테이너 존재 및 집 이름 확인
         cur.execute(
-            "SELECT id FROM containers WHERE id = %s AND house_id = %s",
+            """
+            SELECT c.id, h.name as house_name 
+            FROM containers c 
+            JOIN houses h ON c.house_id = h.id
+            WHERE c.id = %s AND c.house_id = %s
+            """,
             (container_id, house_id)
         )
-        if not cur.fetchone():
+        container_info = cur.fetchone()
+        
+        if not container_info:
             cur.close()
             conn.close()
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
+        
+        current_house_name = container_info['house_name']
         
         # 히스토리 조회 (상세 정보 포함)
         cur.execute(
@@ -780,6 +789,12 @@ def get_container_logs(current_user_id, house_id, container_id):
                 fc.name as from_container_name,
                 cl.to_container_id,
                 tc.name as to_container_name,
+                
+                -- 집 정보 (집 간 이동 시)
+                cl.from_house_id,
+                fh.name as from_house_name,
+                cl.to_house_id,
+                th.name as to_house_name,
                 
                 -- 소유자 정보
                 cl.from_owner_user_id,
@@ -805,6 +820,8 @@ def get_container_logs(current_user_id, house_id, container_id):
             LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
             LEFT JOIN containers fc ON cl.from_container_id = fc.id
             LEFT JOIN containers tc ON cl.to_container_id = tc.id
+            LEFT JOIN houses fh ON cl.from_house_id = fh.id
+            LEFT JOIN houses th ON cl.to_house_id = th.id
             LEFT JOIN users fo ON cl.from_owner_user_id = fo.id
             LEFT JOIN users tou ON cl.to_owner_user_id = tou.id
             LEFT JOIN users creator ON cl.created_user = creator.id
@@ -822,7 +839,8 @@ def get_container_logs(current_user_id, house_id, container_id):
         
         return jsonify({
             'logs': logs,
-            'count': len(logs)
+            'count': len(logs),
+            'current_house_name': current_house_name
         }), 200
         
     except Exception as e:
