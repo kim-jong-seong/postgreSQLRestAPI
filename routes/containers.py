@@ -904,7 +904,7 @@ def move_container_cross_house(current_user_id, house_id, container_id):
                 conn.close()
                 return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
         
-        # 컨테이너 업데이트 (house_id와 up_container_id 모두 변경)
+        # 컨테이너 업데이트 (house_id와 up_container_id 변경)
         cur.execute(
             """
             UPDATE containers
@@ -916,6 +916,25 @@ def move_container_cross_house(current_user_id, house_id, container_id):
             """,
             (to_house_id, parent_id, current_user_id, container_id)
         )
+        
+        # 하위 컨테이너들도 재귀적으로 house_id 업데이트 (중요!)
+        if to_house_id != house_id:
+            cur.execute(
+                """
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM containers WHERE up_container_id = %s
+                    UNION ALL
+                    SELECT c.id FROM containers c
+                    INNER JOIN descendants d ON c.up_container_id = d.id
+                )
+                UPDATE containers
+                SET house_id = %s,
+                    updated_at = CURRENT_TIMESTAMP,
+                    updated_user = %s
+                WHERE id IN (SELECT id FROM descendants)
+                """,
+                (container_id, to_house_id, current_user_id)
+            )
         
         # 로그 기록
         cur.execute(
