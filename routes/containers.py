@@ -947,8 +947,9 @@ def move_container_cross_house(current_user_id, house_id, container_id):
                 from_house_id,
                 to_house_id,
                 log_remk,
-                created_user
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                created_user,
+                updated_user
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 container_id,
@@ -958,7 +959,8 @@ def move_container_cross_house(current_user_id, house_id, container_id):
                 house_id,
                 to_house_id,
                 f"{'같은 집 내' if house_id == to_house_id else '집 간'} 이동",
-                current_user_id
+                current_user_id,
+                current_user_id  # updated_user 추가!
             )
         )
         
