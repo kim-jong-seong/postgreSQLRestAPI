@@ -756,24 +756,15 @@ def get_container_logs(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '접근 권한이 없습니다'}), 403
         
-        # 컨테이너 존재 및 집 이름 확인
+        # 컨테이너 존재 확인
         cur.execute(
-            """
-            SELECT c.id, h.name as house_name 
-            FROM containers c 
-            JOIN houses h ON c.house_id = h.id
-            WHERE c.id = %s AND c.house_id = %s
-            """,
+            "SELECT id FROM containers WHERE id = %s AND house_id = %s",
             (container_id, house_id)
         )
-        container_info = cur.fetchone()
-        
-        if not container_info:
+        if not cur.fetchone():
             cur.close()
             conn.close()
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
-        
-        current_house_name = container_info['house_name']
         
         # 히스토리 조회 (상세 정보 포함)
         cur.execute(
@@ -789,12 +780,6 @@ def get_container_logs(current_user_id, house_id, container_id):
                 fc.name as from_container_name,
                 cl.to_container_id,
                 tc.name as to_container_name,
-                
-                -- 집 정보 (집 간 이동 시)
-                cl.from_house_id,
-                fh.name as from_house_name,
-                cl.to_house_id,
-                th.name as to_house_name,
                 
                 -- 소유자 정보
                 cl.from_owner_user_id,
@@ -820,8 +805,6 @@ def get_container_logs(current_user_id, house_id, container_id):
             LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
             LEFT JOIN containers fc ON cl.from_container_id = fc.id
             LEFT JOIN containers tc ON cl.to_container_id = tc.id
-            LEFT JOIN houses fh ON cl.from_house_id = fh.id
-            LEFT JOIN houses th ON cl.to_house_id = th.id
             LEFT JOIN users fo ON cl.from_owner_user_id = fo.id
             LEFT JOIN users tou ON cl.to_owner_user_id = tou.id
             LEFT JOIN users creator ON cl.created_user = creator.id
@@ -839,8 +822,136 @@ def get_container_logs(current_user_id, house_id, container_id):
         
         return jsonify({
             'logs': logs,
-            'count': len(logs),
-            'current_house_name': current_house_name
+            'count': len(logs)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+# 9. 집 간 컨테이너 이동 (새 API)
+@containers_bp.route('/<house_id>/containers/<container_id>/move', methods=['PATCH'])
+@token_required
+def move_container_cross_house(current_user_id, house_id, container_id):
+    """
+    집 간 컨테이너 이동 (house_id 변경 가능)
+    
+    Request Body:
+    {
+        "parent_id": "C202500002" (optional, null이면 최상위로 이동),
+        "to_house_id": "H202400002" (optional, 다른 집으로 이동)
+    }
+    """
+    try:
+        data = request.json
+        parent_id = data.get('parent_id')
+        to_house_id = data.get('to_house_id', house_id)  # 기본값은 같은 집
+        
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 출발지 집 권한 확인
+        cur.execute(
+            "SELECT role_cd FROM house_members WHERE house_id = %s AND user_id = %s",
+            (house_id, current_user_id)
+        )
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return jsonify({'error': '출발지 집에 대한 권한이 없습니다'}), 403
+        
+        # 목적지 집 권한 확인 (다른 집으로 이동하는 경우)
+        if to_house_id != house_id:
+            cur.execute(
+                "SELECT role_cd FROM house_members WHERE house_id = %s AND user_id = %s",
+                (to_house_id, current_user_id)
+            )
+            if not cur.fetchone():
+                cur.close()
+                conn.close()
+                return jsonify({'error': '목적지 집에 대한 권한이 없습니다'}), 403
+        
+        # 컨테이너 존재 확인 및 원본 데이터 조회
+        cur.execute(
+            """
+            SELECT c.id, c.house_id, c.up_container_id, c.type_cd, c.name,
+                   c.quantity, c.owner_user_id, c.remk
+            FROM containers c
+            WHERE c.id = %s AND c.house_id = %s
+            """,
+            (container_id, house_id)
+        )
+        container = cur.fetchone()
+        
+        if not container:
+            cur.close()
+            conn.close()
+            return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
+        
+        # 목적지 부모 컨테이너 유효성 검사
+        if parent_id is not None:
+            cur.execute(
+                "SELECT id, type_cd FROM containers WHERE id = %s AND house_id = %s",
+                (parent_id, to_house_id)
+            )
+            parent = cur.fetchone()
+            if not parent:
+                cur.close()
+                conn.close()
+                return jsonify({'error': '목적지 부모 컨테이너를 찾을 수 없습니다'}), 404
+            
+            # 물품은 물품 안에 들어갈 수 없음
+            if parent['type_cd'] == 'COM1200003':
+                cur.close()
+                conn.close()
+                return jsonify({'error': '물품 안에는 다른 항목을 넣을 수 없습니다'}), 400
+        
+        # 컨테이너 업데이트 (house_id와 up_container_id 모두 변경)
+        cur.execute(
+            """
+            UPDATE containers
+            SET house_id = %s,
+                up_container_id = %s,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_user = %s
+            WHERE id = %s
+            """,
+            (to_house_id, parent_id, current_user_id, container_id)
+        )
+        
+        # 로그 기록
+        cur.execute(
+            """
+            INSERT INTO container_logs (
+                container_id,
+                act_cd,
+                from_container_id,
+                to_container_id,
+                from_house_id,
+                to_house_id,
+                log_remk,
+                created_user
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                container_id,
+                'COM1300002',  # 이동
+                container['up_container_id'],
+                parent_id,
+                house_id,
+                to_house_id,
+                f"{'같은 집 내' if house_id == to_house_id else '집 간'} 이동",
+                current_user_id
+            )
+        )
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'message': '이동이 완료되었습니다',
+            'container_id': container_id,
+            'from_house_id': house_id,
+            'to_house_id': to_house_id
         }), 200
         
     except Exception as e:
