@@ -42,6 +42,7 @@ def get_my_houses(current_user_id):
                 LEFT JOIN (
                     SELECT house_id, COUNT(*) as count
                     FROM containers
+                    WHERE up_container_id IS NULL
                     GROUP BY house_id
                 ) container_count ON h.id = container_count.house_id
             WHERE hm.user_id = %s
