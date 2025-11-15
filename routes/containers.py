@@ -482,12 +482,13 @@ def update_container(current_user_id, house_id, container_id):
         if location_changed and not (name_changed or quantity_changed or owner_changed or remk_changed):
             cur.execute(
                 """
-                INSERT INTO container_logs 
-                (container_id, act_cd, from_container_id, to_container_id, created_user, updated_user)
-                VALUES (%s, 'COM1300003', %s, %s, %s, %s)
+                INSERT INTO container_logs
+                (container_id, act_cd, from_container_id, to_container_id,
+                 from_house_id, to_house_id, created_user, updated_user)
+                VALUES (%s, 'COM1300003', %s, %s, %s, %s, %s, %s)
                 """,
-                (container_id, original.get('up_container_id'), data['up_container_id'], 
-                 current_user_id, current_user_id)
+                (container_id, original.get('up_container_id'), data['up_container_id'],
+                 house_id, house_id, current_user_id, current_user_id)
             )
         
         # 2. 위치 이동 외 변경사항이 있으면 - 통합 수정 로그
@@ -535,15 +536,18 @@ def update_container(current_user_id, house_id, container_id):
             # 통합 수정 로그 생성
             cur.execute(
                 """
-                INSERT INTO container_logs 
+                INSERT INTO container_logs
                 (container_id, act_cd, from_container_id, to_container_id,
+                 from_house_id, to_house_id,
                  from_quantity, to_quantity, from_owner_user_id, to_owner_user_id,
                  from_remk, to_remk, log_remk, created_user, updated_user)
-                VALUES (%s, 'COM1300004', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, 'COM1300004', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (container_id, 
+                (container_id,
                  original.get('up_container_id') if location_changed else None,
                  data.get('up_container_id') if location_changed else None,
+                 house_id if location_changed else None,
+                 house_id if location_changed else None,
                  original.get('quantity') if quantity_changed else None,
                  data.get('quantity') if quantity_changed else None,
                  original.get('owner_user_id') if owner_changed else None,
@@ -766,63 +770,84 @@ def get_container_logs(current_user_id, house_id, container_id):
             conn.close()
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
         
+        # 현재 컨테이너가 속한 집 이름 조회
+        cur.execute(
+            """
+            SELECT h.name
+            FROM houses h
+            WHERE h.id = %s
+            """,
+            (house_id,)
+        )
+        house_result = cur.fetchone()
+        current_house_name = house_result['name'] if house_result else ''
+
         # 히스토리 조회 (상세 정보 포함)
         cur.execute(
             """
-            SELECT 
+            SELECT
                 cl.id,
                 cl.container_id,
                 cl.act_cd,
                 cd.nm as act_nm,
-                
+
                 -- 위치 정보
                 cl.from_container_id,
                 fc.name as from_container_name,
                 cl.to_container_id,
                 tc.name as to_container_name,
-                
+
+                -- 집 간 이동 정보
+                cl.from_house_id,
+                fh.name as from_house_name,
+                cl.to_house_id,
+                th.name as to_house_name,
+
                 -- 소유자 정보
                 cl.from_owner_user_id,
                 fo.name as from_owner_name,
                 cl.to_owner_user_id,
                 tou.name as to_owner_name,
-                
+
                 -- 수량 정보
                 cl.from_quantity,
                 cl.to_quantity,
-                
+
                 -- 메모 정보
                 cl.from_remk,
                 cl.to_remk,
-                
+
                 -- 기타
                 cl.log_remk,
                 TO_CHAR(cl.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
                 cl.created_user,
                 creator.name as creator_name
-                
+
             FROM container_logs cl
             LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
             LEFT JOIN containers fc ON cl.from_container_id = fc.id
             LEFT JOIN containers tc ON cl.to_container_id = tc.id
+            LEFT JOIN houses fh ON cl.from_house_id = fh.id
+            LEFT JOIN houses th ON cl.to_house_id = th.id
             LEFT JOIN users fo ON cl.from_owner_user_id = fo.id
             LEFT JOIN users tou ON cl.to_owner_user_id = tou.id
             LEFT JOIN users creator ON cl.created_user = creator.id
-            
+
             WHERE cl.container_id = %s
             ORDER BY cl.created_at DESC
             """,
             (container_id,)
         )
-        
+
         logs = cur.fetchall()
-        
+
         cur.close()
         conn.close()
-        
+
         return jsonify({
             'logs': logs,
-            'count': len(logs)
+            'count': len(logs),
+            'current_house_name': current_house_name
         }), 200
         
     except Exception as e:
@@ -953,7 +978,7 @@ def move_container_cross_house(current_user_id, house_id, container_id):
             """,
             (
                 container_id,
-                'COM1300002',  # 이동
+                'COM1300003',  # 이동 (수정: COM1300002 -> COM1300003)
                 container['up_container_id'],
                 parent_id,
                 house_id,
