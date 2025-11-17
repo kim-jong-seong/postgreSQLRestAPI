@@ -306,8 +306,124 @@ def kick_member(current_user_id, house_id, user_id):
         conn.close()
         
         return jsonify({'message': '구성원을 추방했습니다'}), 200
-        
+
     except Exception as e:
         if conn:
             conn.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 7. 집 전체 히스토리 조회
+@houses_bp.route('/<house_id>/logs', methods=['GET'])
+@token_required
+def get_house_logs(current_user_id, house_id):
+    """
+    집의 전체 활동 히스토리 조회
+
+    Query Parameters:
+    - limit: 조회할 로그 개수 (기본 3개, 최대 100개)
+    """
+    try:
+        # limit 파라미터 (기본 3개)
+        limit = request.args.get('limit', 3, type=int)
+        if limit > 100:
+            limit = 100
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # 권한 확인 (해당 집의 구성원인지)
+        cur.execute(
+            "SELECT role_cd FROM house_members WHERE house_id = %s AND user_id = %s",
+            (house_id, current_user_id)
+        )
+        member = cur.fetchone()
+
+        if not member:
+            cur.close()
+            conn.close()
+            return jsonify({'error': '해당 집의 구성원이 아닙니다'}), 403
+
+        # 집 이름 조회
+        cur.execute(
+            "SELECT name FROM houses WHERE id = %s",
+            (house_id,)
+        )
+        house = cur.fetchone()
+        house_name = house['name'] if house else ''
+
+        # 히스토리 조회
+        cur.execute(
+            """
+            SELECT
+                cl.id,
+                cl.container_id,
+                cl.container_name,
+                cl.container_type_cd,
+                ct.nm as container_type_nm,
+                cl.act_cd,
+                cd.nm as act_nm,
+
+                -- 위치 정보
+                cl.from_container_id,
+                fc.name as from_container_name,
+                cl.to_container_id,
+                tc.name as to_container_name,
+
+                -- 집 정보
+                cl.from_house_id,
+                fh.name as from_house_name,
+                cl.to_house_id,
+                th.name as to_house_name,
+
+                -- 소유자 정보
+                cl.from_owner_user_id,
+                fo.name as from_owner_name,
+                cl.to_owner_user_id,
+                tou.name as to_owner_name,
+
+                -- 수량 정보
+                cl.from_quantity,
+                cl.to_quantity,
+
+                -- 메모 정보
+                cl.from_remk,
+                cl.to_remk,
+
+                -- 기타
+                cl.log_remk,
+                cl.created_at,
+                cl.created_user,
+                creator.name as creator_name
+
+            FROM container_logs cl
+            LEFT JOIN com_code_d cd ON cl.act_cd = cd.cd
+            LEFT JOIN com_code_d ct ON cl.container_type_cd = ct.cd
+            LEFT JOIN containers fc ON cl.from_container_id = fc.id
+            LEFT JOIN containers tc ON cl.to_container_id = tc.id
+            LEFT JOIN houses fh ON cl.from_house_id = fh.id
+            LEFT JOIN houses th ON cl.to_house_id = th.id
+            LEFT JOIN users fo ON cl.from_owner_user_id = fo.id
+            LEFT JOIN users tou ON cl.to_owner_user_id = tou.id
+            LEFT JOIN users creator ON cl.created_user = creator.id
+
+            WHERE cl.from_house_id = %s OR cl.to_house_id = %s
+            ORDER BY cl.created_at DESC
+            LIMIT %s
+            """,
+            (house_id, house_id, limit)
+        )
+
+        logs = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            'logs': logs,
+            'count': len(logs),
+            'house_name': house_name
+        }), 200
+
+    except Exception as e:
         return jsonify({'error': str(e)}), 500

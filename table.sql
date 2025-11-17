@@ -297,43 +297,48 @@ CREATE TRIGGER set_container_id
 -- ============================================
 CREATE TABLE container_logs (
     id VARCHAR(11) PRIMARY KEY,
-    container_id VARCHAR(11) NOT NULL,
+    container_id VARCHAR(11),
     act_cd VARCHAR(20) NOT NULL,
-    
+
+    -- 컨테이너 정보 (삭제 대비)
+    container_name VARCHAR(200),
+    container_type_cd VARCHAR(20),
+
     -- 위치 변경
     from_container_id VARCHAR(11),
     to_container_id VARCHAR(11),
-    
-    
+
     -- 집 변경 (집 간 이동 시)
     from_house_id VARCHAR(11),
     to_house_id VARCHAR(11),
+
     -- 소유자 변경
     from_owner_user_id VARCHAR(10),
     to_owner_user_id VARCHAR(10),
-    
+
     -- 수량 변경
     from_quantity INT,
     to_quantity INT,
-    
+
     -- 메모 변경
     from_remk TEXT,
     to_remk TEXT,
-    
+
     -- 이력 메모
     log_remk TEXT,
-    
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_user VARCHAR(10) NOT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_user VARCHAR(10) NOT NULL,
-    
-    FOREIGN KEY (container_id) REFERENCES containers(id) ON DELETE CASCADE,
+
+    FOREIGN KEY (container_id) REFERENCES containers(id) ON DELETE SET NULL,
     FOREIGN KEY (act_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
+    FOREIGN KEY (container_type_cd) REFERENCES com_code_d(cd) ON DELETE RESTRICT,
     FOREIGN KEY (from_container_id) REFERENCES containers(id) ON DELETE SET NULL,
     FOREIGN KEY (to_container_id) REFERENCES containers(id) ON DELETE SET NULL,
-    FOREIGN KEY (from_house_id) REFERENCES houses(id) ON DELETE SET NULL,
-    FOREIGN KEY (to_house_id) REFERENCES houses(id) ON DELETE SET NULL,
+    FOREIGN KEY (from_house_id) REFERENCES houses(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_house_id) REFERENCES houses(id) ON DELETE CASCADE,
     FOREIGN KEY (created_user) REFERENCES users(id) ON DELETE RESTRICT,
     FOREIGN KEY (updated_user) REFERENCES users(id) ON DELETE RESTRICT
 );

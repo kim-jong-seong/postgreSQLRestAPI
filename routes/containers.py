@@ -310,15 +310,16 @@ def create_container(current_user_id, house_id):
         # container_logs 기록 추가 (생성)
         # ============================================
         log_remk = f"{name} 생성"
-        
+
         cur.execute(
             """
-            INSERT INTO container_logs 
-            (container_id, act_cd, to_container_id, to_quantity, to_owner_user_id, 
+            INSERT INTO container_logs
+            (container_id, container_name, container_type_cd, act_cd,
+             to_container_id, to_house_id, to_quantity, to_owner_user_id,
              to_remk, log_remk, created_user, updated_user)
-            VALUES (%s, 'COM1300001', %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, 'COM1300001', %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (container['id'], parent_id, quantity, owner_user_id, 
+            (container['id'], name, type_cd, parent_id, house_id, quantity, owner_user_id,
              remk, log_remk, current_user_id, current_user_id)
         )
         
@@ -443,7 +444,7 @@ def update_container(current_user_id, house_id, container_id):
         # ============================================
         cur.execute(
             """
-            SELECT name, up_container_id, quantity, owner_user_id, remk
+            SELECT name, type_cd, up_container_id, quantity, owner_user_id, remk
             FROM containers
             WHERE id = %s AND house_id = %s
             """,
@@ -483,11 +484,13 @@ def update_container(current_user_id, house_id, container_id):
             cur.execute(
                 """
                 INSERT INTO container_logs
-                (container_id, act_cd, from_container_id, to_container_id,
+                (container_id, container_name, container_type_cd, act_cd,
+                 from_container_id, to_container_id,
                  from_house_id, to_house_id, created_user, updated_user)
-                VALUES (%s, 'COM1300003', %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, 'COM1300003', %s, %s, %s, %s, %s, %s)
                 """,
-                (container_id, original.get('up_container_id'), data['up_container_id'],
+                (container_id, original.get('name'), original.get('type_cd'),
+                 original.get('up_container_id'), data['up_container_id'],
                  house_id, house_id, current_user_id, current_user_id)
             )
         
@@ -537,17 +540,18 @@ def update_container(current_user_id, house_id, container_id):
             cur.execute(
                 """
                 INSERT INTO container_logs
-                (container_id, act_cd, from_container_id, to_container_id,
+                (container_id, container_name, container_type_cd, act_cd,
+                 from_container_id, to_container_id,
                  from_house_id, to_house_id,
                  from_quantity, to_quantity, from_owner_user_id, to_owner_user_id,
                  from_remk, to_remk, log_remk, created_user, updated_user)
-                VALUES (%s, 'COM1300004', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, 'COM1300004', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (container_id,
+                (container_id, original.get('name'), original.get('type_cd'),
                  original.get('up_container_id') if location_changed else None,
                  data.get('up_container_id') if location_changed else None,
-                 house_id if location_changed else None,
-                 house_id if location_changed else None,
+                 house_id,
+                 house_id,
                  original.get('quantity') if quantity_changed else None,
                  data.get('quantity') if quantity_changed else None,
                  original.get('owner_user_id') if owner_changed else None,
@@ -597,34 +601,36 @@ def delete_container(current_user_id, house_id, container_id):
         # 컨테이너 존재 확인 및 상세 정보 조회
         cur.execute(
             """
-            SELECT name, up_container_id, quantity, owner_user_id, remk
-            FROM containers 
+            SELECT name, type_cd, up_container_id, quantity, owner_user_id, remk
+            FROM containers
             WHERE id = %s AND house_id = %s
             """,
             (container_id, house_id)
         )
         container = cur.fetchone()
-        
+
         if not container:
             cur.close()
             conn.close()
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
-        
+
         # ============================================
         # container_logs 기록 추가 (반출) - 삭제 전에 기록
         # ============================================
         log_remk = f"삭제: {container['name']}"
         if container['up_container_id']:
             log_remk += f", 위치: {container['up_container_id']}"
-        
+
         cur.execute(
             """
-            INSERT INTO container_logs 
-            (container_id, act_cd, from_container_id, from_quantity, from_owner_user_id,
+            INSERT INTO container_logs
+            (container_id, container_name, container_type_cd, act_cd,
+             from_container_id, from_house_id, from_quantity, from_owner_user_id,
              from_remk, log_remk, created_user, updated_user)
-            VALUES (%s, 'COM1300002', %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, 'COM1300002', %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (container_id, container['up_container_id'], container.get('quantity'), 
+            (container_id, container['name'], container['type_cd'],
+             container['up_container_id'], house_id, container.get('quantity'),
              container.get('owner_user_id'), container.get('remk'), log_remk,
              current_user_id, current_user_id)
         )
