@@ -392,7 +392,7 @@ def get_house_logs(current_user_id, house_id):
 
                 -- 기타
                 cl.log_remk,
-                cl.created_at,
+                TO_CHAR(cl.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
                 cl.created_user,
                 creator.name as creator_name
 
