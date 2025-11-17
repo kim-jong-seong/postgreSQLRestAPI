@@ -972,6 +972,8 @@ def move_container_cross_house(current_user_id, house_id, container_id):
             """
             INSERT INTO container_logs (
                 container_id,
+                container_name,
+                container_type_cd,
                 act_cd,
                 from_container_id,
                 to_container_id,
@@ -980,10 +982,12 @@ def move_container_cross_house(current_user_id, house_id, container_id):
                 log_remk,
                 created_user,
                 updated_user
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 container_id,
+                container['name'],
+                container['type_cd'],
                 'COM1300003',  # 이동 (수정: COM1300002 -> COM1300003)
                 container['up_container_id'],
                 parent_id,
