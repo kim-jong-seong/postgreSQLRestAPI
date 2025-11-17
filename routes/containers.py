@@ -615,7 +615,7 @@ def delete_container(current_user_id, house_id, container_id):
             return jsonify({'error': '컨테이너를 찾을 수 없습니다'}), 404
 
         # ============================================
-        # container_logs 기록 추가 (반출) - 삭제 전에 기록
+        # container_logs 기록 추가 (삭제) - 삭제 전에 기록
         # ============================================
         log_remk = f"삭제: {container['name']}"
         if container['up_container_id']:
@@ -627,7 +627,7 @@ def delete_container(current_user_id, house_id, container_id):
             (container_id, container_name, container_type_cd, act_cd,
              from_container_id, from_house_id, from_quantity, from_owner_user_id,
              from_remk, log_remk, created_user, updated_user)
-            VALUES (%s, %s, %s, 'COM1300002', %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, 'COM1300007', %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (container_id, container['name'], container['type_cd'],
              container['up_container_id'], house_id, container.get('quantity'),
